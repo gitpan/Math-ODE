@@ -2,10 +2,9 @@ package Math::ODE;
 require 5.003;
 require Exporter;
 use strict;
-use warnings;
 use Carp;
 use vars qw($AUTOLOAD $VERSION);
-my $VERSION = '0.01';
+my $VERSION = '0.02';
 
 
 my @ISA = qw(Exporter);
