@@ -20,6 +20,7 @@ print "ok 1\n";
 
 
 my $o = new Math::ODE ( file => 'data',
+			verbose => 1,
 			step => 0.1,
 			initial => [0,1],     #, -1, 1 ],
 			DE => [ \&DE1, \&DE2 ], #, \&DE3, \&DE4 ],

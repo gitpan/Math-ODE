@@ -2,10 +2,13 @@ package Math::ODE;
 require 5.003;
 require Exporter;
 use strict;
+use Data::Dumper;
 use Carp;
 use vars qw($AUTOLOAD $VERSION);
-my $VERSION = '0.02';
+my $VERSION = '0.03';
 
+$Data::Dumper::Varname = "y";
+$Data::Dumper::Indent = 0;
 
 my @ISA = qw(Exporter);
 my %EXPORT_TAGS = ( 'all' => [ qw( ) ] );
@@ -13,7 +16,7 @@ my @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 my @EXPORT = qw( );
 my %fields;
 
-for my $a ( qw(DE t0 tf step file initial) ) { $fields{$a}++; }
+for my $a ( qw(DE t0 tf step file initial verbose) ) { $fields{$a}++; }
 
 sub evolve {
 	my $self = shift;
@@ -29,10 +32,14 @@ sub evolve {
         while ( $t <= $self->{tf} ){
                 # use Runge Kutta to step from $t to $t + $h
                 $y = _RK4($self,$t,$y);
+                if( $self->{verbose} > 1 ){
+                        warn "Exiting RK4 with t=$t ," . Dumper($y) . "\n";
+                }
                 for $i ( 0 .. $self->{N}-1 ){
                         # check for under/over flow
                         next unless $y->[$i] =~ qr/nan|infinity/i;
-                        die "Bailing out, over/under flow";
+                        warn "Bailing out, over/under flow at t=$t,y->[$i] = $y->[$i]" if $self->{verbose};
+			return undef;
                 }
                 $t += $h;
                 # Save values in file
@@ -73,6 +80,7 @@ sub _RK4 {
 
         for $i ( 0 .. $self->{N}-1 ){ $w4[$i] = $h * &{ $F->[$i] }($t + $h,$q); }
 
+
         for $i ( 0 .. $self->{N}-1 ){ $y->[$i] += ( $w1[$i] + 2 * $w2[$i] + 2 * $w3[$i] + $w4[$i])/6; }
         return $y;
 }
@@ -80,6 +88,7 @@ sub _init {
 	my $self = shift;
 	my %args = @_;
 	# defaults
+	$self->{verbose} = 1;
 	$self->{step} = 0.1;
 	$self->{N}    = scalar( @{ $args{DE} } ) || 1;
 	@$self{keys %args} = values %args;
@@ -103,6 +112,7 @@ sub new {
 	return $self;
 }
 
+# I love AUTOLOAD
 sub AUTOLOAD {
 	my $self = shift;
 	my $a = $AUTOLOAD;
@@ -161,6 +171,7 @@ Evolves the equations from C<$o-E<gt>t0> to C<$o-E<gt>tf> using a 4th Order Clas
 
 	use Math::ODE;
 	my $o = new Math::ODE ( file => 'data',
+				verbose => 1,
 				step => 0.1,
 				initial => [0,1], 
 				DE => [ \&DE0, \&DE1 ], 
@@ -240,6 +251,24 @@ solve), and can be fed directly to gnuplot. The first column is the independent
 variable, and the remaining are the first through nth components of the
 dependent vector. Examples of graphing the data file are in the example/
 directory of the source distribution.
+
+=item *
+
+C<$o-E<gt>verbose($number)>
+
+Sets the verbosity of debugging output. The default of 1 will currently only
+cause C<evolve()> to C<warn> you when it gets C<NaN> or C<Inf>, instead of 
+silently returning C<undef>, when verbosity is set to 0. Setting the verbosity
+to 0 is useful if you are trying to write code to solve boundary value problems
+with the shooting method. You will be guessing initial conditions, and don't feel
+like getting a warning on every guess that blows up (which will be many.) Setting
+the verbosity to 2 will cause a message like the following:
+
+	Exiting RK4 with t=9.9 ,$y1 = ['-0.544013766248772833','-0.839075464413064726'];
+
+to be printed on every increment of the independent variable C<$t>. These are the values
+that the 4th Order Runge-Kutta returned for the current value of C<$t>.
+
 
 
 =back
