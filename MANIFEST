@@ -1,9 +1,6 @@
-README
+Build.PL
 Changes
-Makefile.PL
-MANIFEST
-ODE.pm
-test.pl
+example/data
 example/de1
 example/de2
 example/de3
@@ -12,3 +9,15 @@ example/gnuplot.1
 example/gnuplot.2
 example/gnuplot.3
 example/gnuplot.4
+lib/Math/ODE.pm
+MANIFEST
+META.yml
+README
+t/00-load.t
+t/basic.t
+t/error.t
+t/ode_systems.t
+t/odes.t
+t/values_at.t
+TODO
+Makefile.PL
