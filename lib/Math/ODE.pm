@@ -1,22 +1,30 @@
 package Math::ODE;
 use strict;
 
-require 5.005;
 use Data::Dumper;
 use Carp;
-my $VERSION = '0.04';
+my $VERSION = '0.05_01';
 
 $Data::Dumper::Varname = "y";
-$Data::Dumper::Indent = 0;
+$Data::Dumper::Indent = 1;
 
-sub evolve {
-	my $self = shift;
-	my ($F,$h,$t,$y,$file) = map{ $self->{$_} } qw(ODE step t0 initial file);
-	my $delim = $self->{csv} ? ',' : ($self->{delim} || $self->{delimeter} || " ");
-	
-	if( defined $file ){
-        	open(FD, ">$file") or croak "$file: $!";
-	}
+sub evolve
+{
+    my $self = shift;
+    my ($F,$h,$t,$initial,$file) = map{ $self->{$_} } qw(ODE step t0 initial file);
+    my $delim = $self->{csv} ? ',' : ($self->{delim} || $self->{delimeter} || " ");
+    my $y;
+    my $fh;
+
+    # don't clobber the initial condition in case we want to do multiple runs
+    # with the same object
+    @$y = @$initial;
+
+    if( defined $file ){
+            open($fh,'>', $file) or croak "$file: $!";
+    }
+
+    $self->_clear_values;
 
     while ( $t < $self->{tf} ){
         # use Runge Kutta 4th order to step from $t to $t + $h
@@ -32,59 +40,65 @@ sub evolve {
         }
         $t += $h;
 
+        my $str = join $delim,  map { sprintf "%0.12f", $_ } ($t, @$y);
+        chop $str;
+
         if( defined $file ){
-            my $str = join $delim,  map { sprintf "%0.12f", $_ } ($t, @$y);
-		    chop $str;
-            print FD "$str\n";
-	    }
+            print $fh "$str\n";
+        } elsif ( ! $self->{keep_values} ) {
+            print "$str\n";
+        }
     }
-	close FD if defined $file;
-    return 42;
+    close $fh if defined $file;
+    return $self;
 }
 
-sub _RK4 {
+sub _RK4
+{
         # $t = dependent variable
         # $y = $N - vector of independent variables
         # $h = step size
         # $F = arrayref of coderefs of the equations to solve
-        my $self = shift;
-        my ($t, $y) = @_;
+        my ($self,$t,$y) =  @_;
         my $F = $self->{ODE};
         my $h = $self->{step};
 
         ## w vectors hold constants for equations
         ## each $q holds a modified $y vector to feed to the next
         ## for loop ( ie $y + $w1/2 , etc ... )
-        my (@w1,@w2,@w3,@w4,$q,$i);
+        my (@w1,@w2,@w3,@w4,$q);
+        my @indices = ( 0 .. $self->{N} - 1 );
 
-        for $i ( 0 .. $self->{N}-1 ){ $w1[$i]  = $h * &{ $F->[$i] }($t,$y);           }
-        for $i ( 0 .. $self->{N}-1 ){ $q->[$i] = $y->[$i] + 0.5*$w1[$i];              }
+        map { $w1[$_]  = $h * &{ $F->[$_] }($t,$y)           } @indices;
+        map { $q->[$_] = $y->[$_] + 0.5*$w1[$_]              } @indices;
 
-        for $i ( 0 .. $self->{N}-1 ){ $w2[$i]  = $h * &{ $F->[$i] }($t + 0.5*$h,$q);  }
-        for $i ( 0 .. $self->{N}-1 ){ $q->[$i] = $y->[$i] + 0.5*$w2[$i];              }
+        map { $w2[$_]  = $h * &{ $F->[$_] }($t + 0.5*$h,$q)  } @indices;
+        map { $q->[$_] = $y->[$_] + 0.5*$w2[$_]              } @indices;
 
-        for $i ( 0 .. $self->{N}-1 ){ $w3[$i]  = $h * &{ $F->[$i] }($t + 0.5*$h,$q);  }
-        for $i ( 0 .. $self->{N}-1 ){ $q->[$i] = $y->[$i] + $w3[$i];                  }
+        map { $w3[$_]  = $h * &{ $F->[$_] }($t + 0.5*$h,$q)  } @indices;
+        map { $q->[$_] = $y->[$_] + $w3[$_]                  } @indices;
 
-        for $i ( 0 .. $self->{N}-1 ){ $w4[$i]  = $h * &{ $F->[$i] }($t + $h,$q);      }
+        map { $w4[$_]  = $h * &{ $F->[$_] }($t + $h,$q)      } @indices;
+        map { $y->[$_]+= ( $w1[$_] + 2 * $w2[$_] + 2 * $w3[$_] + $w4[$_])/6 } @indices;
 
+        $self->_store_values( $t + $h, $y );
 
-        for $i ( 0 .. $self->{N}-1 ){ $y->[$i] += ( $w1[$i] + 2 * $w2[$i] + 2 * $w3[$i] + $w4[$i])/6; }
-
-	    $self->_store_values( $t + $h, $y );
-	
         return $y;
+    }
+
+sub _store_values
+{
+    my ($self,$t, $y) = @_;
+    return unless  $self->{keep_values};
+    my $s = sprintf '%0.12f', $t ;
+    push @{ $self->{values}{$s} }, @$y;
 }
-sub _store_values {
-	my ($self,$t, $y) = @_;
-	return unless  $self->{keep_values};
-	my $s = sprintf '%0.12f', $t ; 
-	push @{ $self->{values}{$s} }, @$y;
-}
-sub values_at {
-	my ($self,$t, %args) = @_;
+
+sub values_at
+{
+    my ($self,$t, %args) = @_;
     if ($self->{keep_values}){
-	    return @{ $self->{values}{sprintf('%0.12f',$t)} };
+    return @{ $self->{values}{sprintf('%0.12f',$t)} };
     } else {
         warn "Values were not kept because keep_values was set to 0";
         return;
@@ -93,55 +107,85 @@ sub values_at {
 # because Math::ODE implements a 4th order Runge-Kutta method
 sub error {  $_[0]->{step} ** 4 }
 
-sub _init {
-	my ($self,%args) = @_;
+sub step
+{
+    my ($self,$step) = @_;
+    if (defined $step){
+        croak "Stepsize must be strictly between zero and one"
+                if ($step <= 0 || $step >= 1);
 
-	# defaults
-	$self->{keep_values} = 1;
-	$self->{verbose}     = 1;
-	$self->{step}        = 0.1; 
-	$self->{csv}         = 0;
-	$self->{N}           = scalar( @{ $args{ODE} } ) || 1;
+        $self->{step} = $step;
+    }
+    return $self->{step};
+}
 
-	@$self{keys %args} = values %args;
-	$self->{values} = {};
+sub initial
+{
+    my ($self, $initial) = @_;
+
+    croak "not an array ref" unless ref $initial eq "ARRAY";
+
+    $self->{initial} = $initial;
+
+}
+
+sub _clear_values
+{
+    my $self = shift;
+    $self->{values} = {}
+}
+
+sub _init
+{
+    my ($self,%args) = @_;
+
+    # defaults
+    $self->{keep_values} = 1;
+    $self->{verbose}     = 1;
+    $self->{step}        = 0.1;
+    $self->{csv}         = 0;
+    $self->{N}           = scalar( @{ $args{ODE} } ) || 1;
+
+    @$self{keys %args} = values %args;
+
+    $self->_clear_values;
 
     if( $self->{N} != scalar(  @{ $args{initial } }) ){
                 croak "Must have same number of initial conditions as equations!";
     }
-	if( $self->{step} <= 0  ){
-		croak "Stepsize must be positive!";
-	}
-	if( $self->{t0} >= $self->{tf} ){
-		croak "\$self->t0 must be less than \$self->tf!";
-	}
+
+    croak "Stepsize must be positive!"               if $self->{step} <= 0;
+    croak "\$self->t0 must be less than \$self->tf!" if $self->{t0}   >= $self->{tf};
+
     return $self;
 }
-sub max_error {
+
+sub max_error
+{
     my ($self, $sols) = @_;
 
     my $max_error = 0;
 
     for my $pt ( sort keys %{$self->{values}} ){
         my $k = 0;
+        my @vals = $self->values_at($pt);
+
         for my $sol ( @$sols ) {
-            my @vals = $self->values_at($pt);
             my $res  = abs( $vals[$k]  - &$sol($pt) );
             $max_error = $res if ($res > $max_error);
-            print "pt=$pt, res=$res\n" if ($res > $self->error && debug() );
             $k++;
         }
     }
     $max_error;
 }
-sub debug { 0 }
 
 sub new {
-	my $class = shift;
-	my $self = {};
-	bless($self, $class);
-	$self->_init(@_);
+    my $class = shift;
+    my $self = {};
+    bless $self, $class;
+    $self->_init(@_);
 }
+
 42;
 __END__
 
@@ -260,12 +304,12 @@ Returns the end point on the interval if no arguments are given.
 C<$o-E<gt>file($somefile)>
 
 Save data in $somefile. Returns the file in which the data is being saved if no
-arguments are given. If no file is specified, data is printed to STDOUT.  The
-data file will have $N+1 columns (where $N is the number of equations to
-solve), and can be fed directly to gnuplot. The first column is the independent
-variable, and the remaining are the first through nth components of the
-dependent vector. Examples of graphing the data file are in the example/
-directory of the source distribution.
+arguments are given. If no file is specified and keep_values is set to a
+non-true value , data is printed to STDOUT.  The data file will have $N+1
+columns (where $N is the number of equations to solve), and can be fed directly
+to gnuplot. The first column is the independent variable, and the remaining are
+the first through nth components of the dependent vector. Examples of graphing
+the data file are in the example/ directory of the source distribution.
 
 =item *
 
@@ -285,13 +329,21 @@ to be printed on every increment of the independent variable C<$t>. These are th
 that the 4th Order Runge-Kutta returned for the current value of C<$t>.
 
 =item * 
-my $solution_code_ref = sub { my $x = shift; 5 * $x ** 2 };
-C<$o-E<gt>max_error( [ $solution_code_ref ] );
+
+C<my $solution_code_ref = sub { my $x = shift; 5 * $x ** 2 };>
+
+C<$o-E<gt>max_error( [ $solution_code_ref ] )>;
 
 Returns the maximum error from the computed values and a reference to a list of code references.
+This should be called after C<$o-E<gt>evolve>.
 
 
 =back
+
+=head1 LATEST CODE
+
+The latest released version can always be found at http://search.cpan.org/dist/Math-ODE/ and
+the git repository lives at http://leto.net/gitweb/ or http://github.com/leto .
 
 =head1 AUTHOR
 
@@ -305,11 +357,11 @@ Orwant, Hietaniemi, Macdonald "Mastering Algorithms with Perl" Ch. 16.
 
 =head1 COPYRIGHT
 
-Copyright (c) 2001-2008 by Jonathan Leto.  All rights reserved.
+Copyright (c) 2001-2009 by Jonathan Leto <jonathan@leto.net>.  All rights reserved.
 
 =head1 LICENSE AGREEMENT
 
 This package is free software; you can redistribute it and/or
-modify it under the same terms as Perl itself.
+modify it under the same terms as Perl itself, dude.
 
 =cut
